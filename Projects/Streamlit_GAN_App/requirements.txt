@@ -1,0 +1,8 @@
+torch
+pandas
+numpy
+pytest
+matplotlib
+scikit-learn
+scipy
+streamlit>=1.28.0

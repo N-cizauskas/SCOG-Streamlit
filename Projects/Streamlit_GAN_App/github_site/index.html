@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCOG | Synthetic Control Generator</title>
+  <meta name="description" content="SCOG uses CTGAN to generate synthetic control arms for clinical research and trial simulation." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <div>
+        <h1><span class="red">SCOG</span>: <span class="red">S</span>ynthetic <span class="red">Co</span>ntrol <span class="red">G</span>enerator</h1>
+        <p class="subtitle">CTGAN-based synthetic control generation for tabular clinical datasets.</p>
+        <p class="identity-strip">Built by Nicole Cizauskas | Newcastle University</p>
+        <p><span class="version-badge">Version 1.0 - Last Updated March 2026</span></p>
+      </div>
+      <div class="header-actions">
+        <img class="header-logo" src="SCOG_pics/logo.png" alt="SCOG logo" />
+        <a class="btn btn-primary" href="http://localhost:8501" target="_blank" rel="noopener">Launch Streamlit App</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="welcome-layout">
+        <div>
+          <h2>Welcome to <span class="red">SCOG</span></h2>
+          <p>
+            <span class="red">SCOG</span> (Synthetic Control Generator) uses <strong>Conditional Tabular Generative Adversarial Networks</strong> to generate synthetic control arms for clinical trials.
+          </p>
+        </div>
+        <div class="welcome-visual">
+          <img src="SCOG_pics/head_blink_gif.gif" alt="SCOG animated head" />
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="green-heading">Conditional Tabular Generative Adversarial Network (CTGAN)</h2>
+      <p>
+        A <strong>CTGAN</strong> is a machine learning model that learns the patterns and relationships in tabular data and generates
+        synthetic rows that closely resemble the original data by maintaining its statistical properties.
+        A CTGAN contains two main components: a generator and a discriminator.
+      </p>
+
+      <h3>Generator</h3>
+        <ul>
+          <li>Takes random noise as initial input</li>
+          <li>Generates synthetic data points that mimic the real data</li>
+          <li>Learns to create and improve data with realistic distributions and correlations</li>
+        </ul>
+
+      <h3>Discriminator</h3>
+        <ul>
+          <li>Distinguishes real data from synthetic data</li>
+          <li>Provides feedback to the generator on synthetic data quality</li>
+          <li>Creates an adversarial training process that improves both components</li>
+        </ul>
+
+      <h3>Conditional Generation</h3>
+      <ul>
+        <li>CTGAN supports conditional generation: you can specify that synthetic records should have particular values for certain columns</li>
+        <li>This is ideal for generating balanced control arms in randomised trials</li>
+      </ul>
+
+      <h3>Tabular Data</h3>
+      <ul>
+        <li>Most clinical trial data is made up of tables with mixed data types</li>
+        <li>CTGANs are designed to handle tabular data and mixed data types, making them well suited for synthetic control generation</li>
+      </ul>
+
+      <h2 class="green-heading">Use Cases</h2>
+      <h4>Augment clinical trials with small sample sizes</h4>
+      <ul>
+        <li>Hybrid synthetic controls can supplement limited real control arms to increase statistical power</li>
+        <li>Fully synthetic control arms can reduce the need to recruit for control groups (useful for rare diseases or pediatric trials)</li>
+      </ul>
+
+      <h4>Trial simulation</h4>
+      <ul>
+        <li>Synthetic control arms can be used in predictive trial modelling to simulate outcomes</li>
+      </ul>
+
+      <h4>Share data safely</h4>
+      <ul>
+        <li>Synthetic controls can be used to distribute meaningful patient data without revealing real patient information</li>
+      </ul>
+
+      <figure class="diagram">
+        <img src="gan.drawio.png" alt="Structure of a GAN" />
+        <figcaption>Structure of a GAN</figcaption>
+      </figure>
+    </section>
+
+    <section class="card">
+      <h2>How to Use <span class="red">SCOG</span></h2>
+      <ol>
+        <li>Go to the <span class="blue-text">Upload Data</span> page to load your dataset</li>
+        <li>Go to <span class="blue-text">Preprocessing</span> for assessments and column setup</li>
+        <li>Follow the <span class="blue-text">Configure Model</span> page to set up hyperparameters</li>
+        <li>Click <span class="blue-text">Train Model</span> to begin training</li>
+        <li>Review results in <span class="blue-text">View Results</span></li>
+        <li>Compare against alternative synthesis methods in <span class="blue-text">Method Comparison</span></li>
+        <li><span class="blue-text">Download</span> your outputs in <span class="blue-text">Download</span></li>
+      </ol>
+      <div class="actions">
+        <a class="btn btn-primary" href="http://localhost:8501" target="_blank" rel="noopener">Launch Streamlit App</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Contact the Creator</h2>
+      <p>Email: <a href="mailto:n.cizauskas2@newcastle.ac.uk">n.cizauskas2@newcastle.ac.uk</a></p>
+      <p>GitHub: <a href="https://github.com/N-cizauskas" target="_blank" rel="noopener">https://github.com/N-cizauskas</a></p>
+    </section>
+  </main>
+</body>
+</html>
