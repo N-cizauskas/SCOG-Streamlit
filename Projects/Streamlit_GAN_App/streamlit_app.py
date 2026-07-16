@@ -223,6 +223,12 @@ if 'comparison_synth_data' not in st.session_state:
     st.session_state.comparison_synth_data = {}
 if 'comparison_selected_metrics' not in st.session_state:
     st.session_state.comparison_selected_metrics = []
+if 'training_duration_seconds' not in st.session_state:
+    st.session_state.training_duration_seconds = None
+if 'training_started_at' not in st.session_state:
+    st.session_state.training_started_at = None
+if 'result_plot_downloads' not in st.session_state:
+    st.session_state.result_plot_downloads = {}
 
 
 def compute_correlation_report(real_df: pd.DataFrame, synth_df: pd.DataFrame | None = None):
@@ -2129,6 +2135,7 @@ elif page == "Train Model":
                     status_text.text("Training model... (this may take a few minutes)")
                     progress_bar.progress(25)
                     training_start_time = time.time()
+                    st.session_state.training_started_at = training_start_time
                     epoch_timestamps = {}
 
                     def on_training_progress(payload: dict):
@@ -2161,6 +2168,9 @@ elif page == "Train Model":
                                 status_text.text(f"Training model... Epoch {epoch}/{total_epochs} | {eta_text}")
 
                     model.fit(st.session_state.df, progress_callback=on_training_progress)
+                    training_end_time = time.time()
+                    training_duration = training_end_time - training_start_time
+                    st.session_state.training_duration_seconds = training_duration
                     
                     status_text.text("Training complete!")
                     progress_bar.progress(82)
@@ -2214,6 +2224,12 @@ elif page == "Train Model":
                                 len(synthetic_df),
                                 help="Generated synthetic rows"
                             )
+                        with col1:
+                            st.metric(
+                                "Training Time",
+                                f"{st.session_state.training_duration_seconds:.1f}s" if st.session_state.training_duration_seconds is not None else "N/A",
+                                help="Elapsed wall-clock time spent training the model"
+                            )
                         if st.session_state.config.get('use_correlation_model', False):
                             st.caption(
                                 f"Model used: CorrelationAwareCTGAN (weight={st.session_state.config.get('correlation_loss_weight', 1.0):.2f})"
@@ -2259,6 +2275,13 @@ elif page == "View Results":
         with col4:
             auc_val = metrics.get('auc', 0.5)
             st.metric("AUC", f"{auc_val:.4f}", help="Real vs Synthetic distinguishability")
+
+        if st.session_state.training_duration_seconds is not None:
+            st.metric(
+                "Training Time",
+                f"{st.session_state.training_duration_seconds:.1f}s",
+                help="Elapsed wall-clock time spent training the model"
+            )
 
         cfg_for_distance = st.session_state.get('config', {})
         cont_for_distance = list(cfg_for_distance.get('continuous_cols', []))
@@ -2443,6 +2466,13 @@ elif page == "View Results":
                 with open(loss_plot_path, 'rb') as f:
                     img_bytes = f.read()
                 st.image(img_bytes, width="stretch")
+                st.download_button(
+                    label="Download Loss Curves PNG",
+                    data=img_bytes,
+                    file_name=os.path.basename(loss_plot_path),
+                    mime="image/png",
+                    help="Download the loss curves as a PNG image"
+                )
             except Exception as e:
                 st.warning(f"Could not generate loss plot: {e}")
         
@@ -2455,6 +2485,13 @@ elif page == "View Results":
                 with open(dist_plot_path, 'rb') as f:
                     img_bytes = f.read()
                 st.image(img_bytes, width="stretch")
+                st.download_button(
+                    label="Download Distribution PNG",
+                    data=img_bytes,
+                    file_name=os.path.basename(dist_plot_path),
+                    mime="image/png",
+                    help="Download the numeric distribution comparison as a PNG image"
+                )
             except Exception as e:
                 st.warning(f"Could not generate distribution plot: {e}")
         
@@ -2474,6 +2511,13 @@ elif page == "View Results":
                     with open(cat_plot_path, 'rb') as f:
                         img_bytes = f.read()
                     st.image(img_bytes, width="stretch")
+                    st.download_button(
+                        label="Download Categorical Distribution PNG",
+                        data=img_bytes,
+                        file_name=os.path.basename(cat_plot_path),
+                        mime="image/png",
+                        help="Download the categorical distribution comparison as a PNG image"
+                    )
                 else:
                     st.info("No categorical columns found to compare for this dataset.")
             except Exception as e:
@@ -2488,6 +2532,13 @@ elif page == "View Results":
                 with open(pca_plot_path, 'rb') as f:
                     img_bytes = f.read()
                 st.image(img_bytes, width="stretch")
+                st.download_button(
+                    label="Download PCA PNG",
+                    data=img_bytes,
+                    file_name=os.path.basename(pca_plot_path),
+                    mime="image/png",
+                    help="Download the PCA projection as a PNG image"
+                )
             except Exception as e:
                 st.warning(f"Could not generate PCA plot: {e}")
         
@@ -2541,6 +2592,13 @@ elif page == "View Results":
                     with open(love_plot_full, 'rb') as f:
                         img_bytes = f.read()
                     st.image(img_bytes, width="stretch")
+                    st.download_button(
+                        label="Download Love Plot PNG",
+                        data=img_bytes,
+                        file_name=os.path.basename(love_plot_full),
+                        mime="image/png",
+                        help="Download the Love plot as a PNG image"
+                    )
                 else:
                     st.warning("Love plot file not found")
             except Exception as e:
