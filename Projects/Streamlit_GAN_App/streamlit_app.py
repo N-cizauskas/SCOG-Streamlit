@@ -2321,6 +2321,23 @@ elif page == "View Results":
             auc_val = metrics.get('auc', 0.5)
             st.metric("AUC", f"{auc_val:.4f}", help="Real vs Synthetic distinguishability")
 
+        # second row: SMD and k-anonymity
+        smd_dict = metrics.get('smd', {})
+        _k_anon_top = EvaluationMetrics.compute_k_anonymity(st.session_state.synthetic_df)
+        m1, m2 = st.columns(2)
+        with m1:
+            if smd_dict:
+                mean_smd = sum(abs(v) for v in smd_dict.values()) / len(smd_dict)
+                st.metric("Mean |SMD|", f"{mean_smd:.4f}", help="Mean absolute Standardized Mean Difference across all features (target < 0.1)")
+            else:
+                st.metric("Mean |SMD|", "N/A", help="SMD not available")
+        with m2:
+            _synth_k = _k_anon_top.get('k_anonymity')
+            if _synth_k is None:
+                st.metric("Synthetic k-Anonymity", "∞", help="All rows are unique quasi-identifier combinations")
+            else:
+                st.metric("Synthetic k-Anonymity", str(_synth_k), help="Minimum group size sharing the same quasi-identifier values in synthetic data")
+
         if st.session_state.training_duration_seconds is not None:
             st.metric(
                 "Training Time",
@@ -2679,6 +2696,35 @@ elif page == "View Results":
             st.markdown("---")
             st.subheader("Propensity Score Matching (PSM)")
             st.write("Run nearest-neighbour PSM to create matched subsets and compare balance before/after matching.")
+
+            # propensity score summary (no matching needed)
+            with st.expander("Propensity Score Summary", expanded=True):
+                st.write("Fit a logistic regression model to distinguish real vs synthetic records and report the propensity score (PS) model AUC.")
+                if st.button("Compute Propensity Score"):
+                    try:
+                        with st.spinner("Computing propensity scores..."):
+                            _ps_result = EvaluationMetrics.compute_propensity_scores(
+                                st.session_state.df,
+                                st.session_state.synthetic_df
+                            )
+                        ps_auc = _ps_result['auc']
+                        mean_real_ps = float(np.mean(_ps_result['probs_real']))
+                        mean_synth_ps = float(np.mean(_ps_result['probs_synth']))
+                        ps_c1, ps_c2, ps_c3 = st.columns(3)
+                        with ps_c1:
+                            st.metric("PS Model AUC", f"{ps_auc:.4f}", help="AUC of logistic PS model (0.5 = indistinguishable, 1.0 = perfectly separable)")
+                        with ps_c2:
+                            st.metric("Mean PS (Real)", f"{mean_real_ps:.4f}", help="Average predicted probability of being real for real records")
+                        with ps_c3:
+                            st.metric("Mean PS (Synthetic)", f"{mean_synth_ps:.4f}", help="Average predicted probability of being real for synthetic records")
+                        if ps_auc < 0.6:
+                            st.success("PS AUC < 0.6 — synthetic data is difficult to distinguish from real.")
+                        elif ps_auc < 0.75:
+                            st.warning("PS AUC 0.6–0.75 — some distinguishability; consider more training.")
+                        else:
+                            st.error("PS AUC ≥ 0.75 — synthetic data is readily distinguishable from real.")
+                    except Exception as _ps_e:
+                        st.error(f"Propensity score computation failed: {_ps_e}")
 
             psm_enable = st.checkbox("Enable PSM")
             if psm_enable:
