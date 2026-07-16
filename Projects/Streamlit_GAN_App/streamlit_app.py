@@ -1901,6 +1901,7 @@ elif page == "Train Model":
         st.error(".Please configure model first.")
     else:
         st.subheader("Model Status: Ready to Train", anchor=False)
+        active_cols = get_active_model_columns()
         
         # display configuration
         with st.expander("Current Configuration", expanded=False):
