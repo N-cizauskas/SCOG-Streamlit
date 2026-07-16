@@ -229,6 +229,8 @@ if 'training_started_at' not in st.session_state:
     st.session_state.training_started_at = None
 if 'result_plot_downloads' not in st.session_state:
     st.session_state.result_plot_downloads = {}
+if 'excluded_cols' not in st.session_state:
+    st.session_state.excluded_cols = []
 
 
 def compute_correlation_report(real_df: pd.DataFrame, synth_df: pd.DataFrame | None = None):
@@ -281,6 +283,20 @@ def compute_correlation_report(real_df: pd.DataFrame, synth_df: pd.DataFrame | N
         })
 
     return report
+
+
+def get_active_model_columns():
+    excluded = set(st.session_state.get('excluded_cols', []))
+
+    def keep(values):
+        return [c for c in values if c not in excluded]
+
+    return {
+        'continuous_cols': keep(st.session_state.get('continuous_cols', [])),
+        'categorical_cols': keep(st.session_state.get('categorical_cols', [])),
+        'binary_cols': keep(st.session_state.get('binary_cols', [])),
+        'ordinal_cols': keep(st.session_state.get('ordinal_cols', [])),
+    }
 
 
 def _approx_wasserstein_distance_1d(real_values: np.ndarray, synth_values: np.ndarray) -> float:
@@ -1461,6 +1477,22 @@ elif page == "Preprocessing":
             )
             st.session_state.binary_cols = binary_cols
 
+        st.subheader("Exclude Columns From Model", anchor=False)
+        st.caption("Select columns you want to keep in the dataset but exclude from model training and evaluation.")
+        excluded_cols = st.multiselect(
+            "Excluded Columns",
+            options=st.session_state.df.columns.tolist(),
+            default=[c for c in st.session_state.excluded_cols if c in st.session_state.df.columns],
+            help="These columns will stay in the dataset preview but will not be used by the model."
+        )
+        st.session_state.excluded_cols = excluded_cols
+
+        active_cols = get_active_model_columns()
+        active_count = len(active_cols['continuous_cols']) + len(active_cols['categorical_cols']) + len(active_cols['binary_cols']) + len(active_cols['ordinal_cols'])
+        st.info(
+            f"Active model columns: {active_count} | Excluded columns: {len(st.session_state.excluded_cols)}"
+        )
+
         # condition column selection
         st.subheader("Condition Column (Optional)", anchor=False)
         st.write("Select a column for conditional generation.")
@@ -1474,8 +1506,8 @@ elif page == "Preprocessing":
 
         condition_col = st.selectbox(
             "Choose condition column",
-            options=[None] + st.session_state.df.columns.tolist(),
-            index=([None] + st.session_state.df.columns.tolist()).index(st.session_state.condition_col) if st.session_state.condition_col in st.session_state.df.columns.tolist() else 0,
+            options=[None] + [c for c in st.session_state.df.columns.tolist() if c not in st.session_state.excluded_cols],
+            index=([None] + [c for c in st.session_state.df.columns.tolist() if c not in st.session_state.excluded_cols]).index(st.session_state.condition_col) if st.session_state.condition_col in st.session_state.df.columns.tolist() and st.session_state.condition_col not in st.session_state.excluded_cols else 0,
             format_func=lambda x: "No condition column" if x is None else x,
             help="Leave as 'No condition column' if you don't need conditional generation"
         )
@@ -1500,6 +1532,11 @@ elif page == "Configure Model":
         st.error("Please upload data first.")
     else:
         condition_col = st.session_state.get('condition_col', None)
+        active_cols = get_active_model_columns()
+        active_continuous_cols = active_cols['continuous_cols']
+        active_categorical_cols = active_cols['categorical_cols']
+        active_binary_cols = active_cols['binary_cols']
+        active_ordinal_cols = active_cols['ordinal_cols']
         
         # model hyperparameters
         st.subheader("Categorical Encoding Option", anchor=False)
@@ -1514,7 +1551,7 @@ elif page == "Configure Model":
 
         ordinal_orders = {}
         if encoding_mode == "ordinal":
-            ordinal_candidates = [c for c in (st.session_state.categorical_cols + st.session_state.binary_cols) if c != condition_col]
+            ordinal_candidates = [c for c in (active_categorical_cols + active_binary_cols) if c != condition_col]
             st.session_state.ordinal_cols = st.multiselect(
                 "Ordinal Columns",
                 options=ordinal_candidates,
@@ -1757,10 +1794,11 @@ elif page == "Configure Model":
         **Data**: {len(st.session_state.df)} rows, {len(st.session_state.df.columns)} columns
 
         **Column Types:**
-        - Continuous: {len(st.session_state.continuous_cols)} columns
-        - Categorical: {len(st.session_state.categorical_cols)} columns
-        - Binary: {len(st.session_state.binary_cols)} columns
-        - Ordinal: {len(st.session_state.ordinal_cols)} columns
+        - Continuous: {len(active_continuous_cols)} columns
+        - Categorical: {len(active_categorical_cols)} columns
+        - Binary: {len(active_binary_cols)} columns
+        - Ordinal: {len(active_ordinal_cols)} columns
+        - Excluded: {len(st.session_state.excluded_cols)} columns
         - Condition Column: {condition_col if condition_col else "None"}
         - Encoding Mode: {encoding_mode}
 
@@ -1791,6 +1829,7 @@ elif page == "Configure Model":
             'correlation_loss_weight': 1.0,
             'encoding_mode': 'onehot',
             'ordinal_cols': [],
+            'excluded_cols': list(st.session_state.excluded_cols),
         }
 
         correlation_loss_weight = 1.0
@@ -1820,6 +1859,7 @@ elif page == "Configure Model":
             'correlation_loss_weight': correlation_loss_weight,
             'encoding_mode': encoding_mode,
             'ordinal_cols': list(st.session_state.ordinal_cols),
+            'excluded_cols': list(st.session_state.excluded_cols),
         }
         render_changed_hyperparameters(configure_current, configure_defaults)
         
@@ -1867,9 +1907,11 @@ elif page == "Train Model":
             st.json({
                 'rows': len(st.session_state.df),
                 'columns': len(st.session_state.df.columns),
-                'continuous': len(st.session_state.config['continuous_cols']),
-                'categorical': len(st.session_state.config['categorical_cols']),
-                'binary': len(st.session_state.config['binary_cols']),
+                'continuous': len(active_cols['continuous_cols']),
+                'categorical': len(active_cols['categorical_cols']),
+                'binary': len(active_cols['binary_cols']),
+                'ordinal': len(active_cols['ordinal_cols']),
+                'excluded': len(st.session_state.config.get('excluded_cols', [])),
                 'max_epochs': st.session_state.config['epochs'],
                 'patience': st.session_state.config['patience']
             })
@@ -1898,6 +1940,7 @@ elif page == "Train Model":
                 'correlation_loss_weight': 1.0,
                 'encoding_mode': 'onehot',
                 'ordinal_cols': [],
+                'excluded_cols': list(st.session_state.get('excluded_cols', [])),
             }
             train_current = {
                 'noise_dim': cfg['noise_dim'],
@@ -2059,11 +2102,12 @@ elif page == "Train Model":
                     selected_ordinal_cols = st.session_state.config.get('ordinal_cols', []) if st.session_state.config.get('encoding_mode', 'onehot') == 'ordinal' else []
                     selected_ordinal_orders = st.session_state.config.get('ordinal_orders', {}) if st.session_state.config.get('encoding_mode', 'onehot') == 'ordinal' else {}
 
-                    categorical_for_model = [c for c in st.session_state.config['categorical_cols'] if c not in selected_ordinal_cols]
-                    binary_for_model = [c for c in st.session_state.config['binary_cols'] if c not in selected_ordinal_cols]
+                    active_model_cols = get_active_model_columns()
+                    categorical_for_model = [c for c in active_model_cols['categorical_cols'] if c not in selected_ordinal_cols]
+                    binary_for_model = [c for c in active_model_cols['binary_cols'] if c not in selected_ordinal_cols]
 
                     model_kwargs = dict(
-                        continuous_cols=st.session_state.config['continuous_cols'],
+                        continuous_cols=active_model_cols['continuous_cols'],
                         categorical_cols=categorical_for_model,
                         binary_cols=binary_for_model,
                         ordinal_cols=selected_ordinal_cols,
