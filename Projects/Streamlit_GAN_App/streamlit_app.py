@@ -2237,15 +2237,6 @@ elif page == "Train Model":
                     # generate synthetic data
                     synthetic_df = model.sample(len(st.session_state.df))
                     
-                    # If a condition column was used during training, regenerate it by sampling from the original distribution
-                    # (the model uses it for conditioning but doesn't return it)
-                    condition_col_used = st.session_state.config.get('condition_col')
-                    if condition_col_used and condition_col_used in st.session_state.df.columns and condition_col_used not in synthetic_df.columns:
-                        # Sample condition column from original data distribution
-                        original_condition_values = st.session_state.df[condition_col_used].dropna().values
-                        sampled_condition = np.random.choice(original_condition_values, size=len(synthetic_df), replace=True)
-                        synthetic_df[condition_col_used] = sampled_condition
-                    
                     st.session_state.synthetic_df = synthetic_df
                     
                     # compute metrics
@@ -2364,40 +2355,44 @@ elif page == "View Results":
         st.subheader("Treatment Effect Maintenance", anchor=False)
         with st.expander("Treatment Effect Maintenance", expanded=False):
             st.write(
-                "Manually select a treatment column and outcome column to compare treatment effect in original vs synthetic data."
+                "Evaluate treatment-effect preservation using condition-specific synthetic sampling. This does not modify the main synthetic dataset or other metrics."
             )
 
             all_cols = st.session_state.df.columns.tolist()
             synth_cols = st.session_state.synthetic_df.columns.tolist()
-            shared_cols = [c for c in all_cols if c in synth_cols]
+            condition_col = st.session_state.get('config', {}).get('condition_col') or st.session_state.get('condition_col')
             
             # Debug info
             with st.expander("Column Debug Info", expanded=False):
                 st.write(f"**Original DF columns ({len(all_cols)}):** {all_cols}")
                 st.write(f"**Synthetic DF columns ({len(synth_cols)}):** {synth_cols}")
-                st.write(f"**Shared columns ({len(shared_cols)}):** {shared_cols}")
+                st.write(f"**Configured conditional column:** {condition_col}")
                 st.write(f"**Excluded columns:** {st.session_state.get('excluded_cols', [])}")
                 st.write(f"**Conditional column set to:** {st.session_state.get('condition_col', 'None')}")
-            
-            st.caption(f"Available shared columns: {', '.join(shared_cols) if shared_cols else 'None found'}")
 
-            if not shared_cols:
-                st.warning("No columns are shared between original and synthetic data.")
+            if not condition_col or condition_col not in st.session_state.df.columns:
+                st.warning("No valid conditional column is configured. Set a condition column in Configure Model to use treatment-effect evaluation.")
             else:
                 te_select_c1, te_select_c2 = st.columns(2)
-                
+
                 with te_select_c1:
-                    treat_col = st.selectbox(
+                    st.text_input(
                         "Treatment/Condition Column",
-                        options=shared_cols,
-                        help="Select the column containing treatment/group assignments.",
-                        key="te_treat_col_select"
+                        value=str(condition_col),
+                        disabled=True,
+                        help="Treatment-effect evaluation uses the configured conditional column."
                     )
-                
+
                 with te_select_c2:
-                    numeric_cols = [c for c in shared_cols if c != treat_col and pd.api.types.is_numeric_dtype(st.session_state.df[c]) and pd.api.types.is_numeric_dtype(st.session_state.synthetic_df[c])]
+                    numeric_cols = [
+                        c for c in st.session_state.df.columns
+                        if c != condition_col
+                        and c in st.session_state.synthetic_df.columns
+                        and pd.api.types.is_numeric_dtype(st.session_state.df[c])
+                        and pd.api.types.is_numeric_dtype(st.session_state.synthetic_df[c])
+                    ]
                     if not numeric_cols:
-                        st.warning("No numeric outcome columns available (excluding treatment column).")
+                        st.warning("No numeric outcome columns available for treatment-effect comparison.")
                         outcome_col = None
                     else:
                         outcome_col = st.selectbox(
@@ -2408,24 +2403,23 @@ elif page == "View Results":
                         )
 
                 if outcome_col is not None:
-                    real_levels = list(pd.Series(st.session_state.df[treat_col]).dropna().unique())
-                    synth_levels = list(pd.Series(st.session_state.synthetic_df[treat_col]).dropna().unique())
-                    common_levels = sorted([v for v in real_levels if v in synth_levels])
+                    cond_series = pd.Series(st.session_state.df[condition_col]).dropna()
+                    cond_levels = list(pd.Categorical(cond_series).categories)
 
-                    if len(common_levels) < 2:
-                        st.warning("Need at least 2 shared treatment levels to compute treatment effect.")
+                    if len(cond_levels) < 2:
+                        st.warning("Need at least 2 condition levels in the configured conditional column to compute treatment effect.")
                     else:
-                        st.write(f"**Found {len(common_levels)} common treatment levels: {common_levels}**")
+                        st.write(f"**Found {len(cond_levels)} treatment levels: {cond_levels}**")
                         
                         te_level_c1, te_level_c2 = st.columns(2)
                         with te_level_c1:
                             treated_value = st.selectbox(
                                 "Treated level",
-                                options=common_levels,
+                                options=cond_levels,
                                 index=0,
                                 key="te_treated_value_select"
                             )
-                        remaining = [v for v in common_levels if v != treated_value]
+                        remaining = [v for v in cond_levels if v != treated_value]
                         with te_level_c2:
                             control_value = st.selectbox(
                                 "Control level",
@@ -2448,8 +2442,29 @@ elif page == "View Results":
                                 'n_control': len(control_rows),
                             }
 
-                        te_real = _compute_te(st.session_state.df, treat_col, outcome_col, treated_value, control_value)
-                        te_synth = _compute_te(st.session_state.synthetic_df, treat_col, outcome_col, treated_value, control_value)
+                        cat_categories = list(getattr(st.session_state.model, 'preprocessor', None).cat_categories.get(condition_col, [])) if getattr(st.session_state.model, 'preprocessor', None) is not None else []
+                        if not cat_categories:
+                            cat_categories = list(pd.Categorical(cond_series).categories)
+
+                        if treated_value not in cat_categories or control_value not in cat_categories:
+                            st.error("Selected treatment levels are not available in the model's condition categories.")
+                            te_real = None
+                            te_synth = None
+                        else:
+                            treated_idx = cat_categories.index(treated_value)
+                            control_idx = cat_categories.index(control_value)
+
+                            real_te_df = st.session_state.df.copy()
+
+                            synth_treated = st.session_state.model.sample(len(real_te_df), condition=treated_idx)
+                            synth_treated[condition_col] = treated_value
+                            synth_control = st.session_state.model.sample(len(real_te_df), condition=control_idx)
+                            synth_control[condition_col] = control_value
+
+                            synth_te_df = pd.concat([synth_treated, synth_control], ignore_index=True)
+
+                            te_real = _compute_te(real_te_df, condition_col, outcome_col, treated_value, control_value)
+                            te_synth = _compute_te(synth_te_df, condition_col, outcome_col, treated_value, control_value)
 
                         if te_real is None or te_synth is None:
                             st.error("Could not compute treatment effect (missing data in treated/control groups).")
@@ -2462,6 +2477,7 @@ elif page == "View Results":
                             else:
                                 maintenance_pct = max(0.0, 100.0 * (1.0 - effect_gap / abs(real_effect)))
 
+                            st.caption("Synthetic treatment effect is computed from evaluation-only condition-specific samples and does not affect the main synthetic dataset or other metrics.")
                             st.write("### Treatment Effects (Treated - Control)")
                             te_m1, te_m2, te_m3, te_m4 = st.columns(4)
                             with te_m1:
