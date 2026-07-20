@@ -189,6 +189,12 @@ if 'ordinal_orders' not in st.session_state:
     st.session_state.ordinal_orders = {}
 if 'condition_col' not in st.session_state:
     st.session_state.condition_col = None
+if 'te_outcome_col' not in st.session_state:
+    st.session_state.te_outcome_col = None
+if 'te_treated_value' not in st.session_state:
+    st.session_state.te_treated_value = None
+if 'te_control_value' not in st.session_state:
+    st.session_state.te_control_value = None
 if 'outlier_enabled' not in st.session_state:
     st.session_state.outlier_enabled = False
 if 'outlier_columns' not in st.session_state:
@@ -2352,11 +2358,16 @@ elif page == "View Results":
             )
 
             cfg_cond_col = st.session_state.get('config', {}).get('condition_col')
+            sess_cond_col = st.session_state.get('condition_col')
+            
             treat_col = None
-            if cfg_cond_col in st.session_state.df.columns:
+            # Try config condition_col first (highest priority)
+            if cfg_cond_col and cfg_cond_col in st.session_state.df.columns:
                 treat_col = cfg_cond_col
-            elif st.session_state.get('condition_col') in st.session_state.df.columns:
-                treat_col = st.session_state.get('condition_col')
+            # Try session state condition_col
+            elif sess_cond_col and sess_cond_col in st.session_state.df.columns:
+                treat_col = sess_cond_col
+            # Try 'treat' column
             elif 'treat' in st.session_state.df.columns:
                 treat_col = 'treat'
 
@@ -2373,11 +2384,18 @@ elif page == "View Results":
                 if not numeric_outcomes:
                     st.warning("No numeric outcome columns available for treatment-effect comparison.")
                 else:
+                    # Initialize outcome column in session state if not already set
+                    if st.session_state.te_outcome_col not in numeric_outcomes if st.session_state.te_outcome_col else True:
+                        st.session_state.te_outcome_col = numeric_outcomes[0] if numeric_outcomes else None
+                    
                     outcome_col = st.selectbox(
                         "Outcome column",
                         options=numeric_outcomes,
-                        help="Select a numeric outcome to compare treatment effect in real vs synthetic data."
+                        index=numeric_outcomes.index(st.session_state.te_outcome_col) if st.session_state.te_outcome_col in numeric_outcomes else 0,
+                        help="Select a numeric outcome to compare treatment effect in real vs synthetic data.",
+                        key="te_outcome_selectbox"
                     )
+                    st.session_state.te_outcome_col = outcome_col
 
                     real_levels = [v for v in pd.Series(st.session_state.df[treat_col]).dropna().unique().tolist()]
                     synth_levels = [v for v in pd.Series(st.session_state.synthetic_df[treat_col]).dropna().unique().tolist()]
@@ -2391,23 +2409,33 @@ elif page == "View Results":
                         if len(common_levels) > 2:
                             te_c1, te_c2 = st.columns(2)
                             with te_c1:
+                                # Initialize treated value if not set or not in common_levels
+                                if st.session_state.te_treated_value not in common_levels:
+                                    st.session_state.te_treated_value = common_levels[0] if common_levels else None
                                 treated_value = st.selectbox(
                                     "Treated level",
                                     options=common_levels,
-                                    index=0,
-                                    key="treated_level_select"
+                                    index=common_levels.index(st.session_state.te_treated_value) if st.session_state.te_treated_value in common_levels else 0,
+                                    key="te_treated_level_select"
                                 )
+                                st.session_state.te_treated_value = treated_value
                             remaining_levels = [v for v in common_levels if v != treated_value]
                             with te_c2:
+                                # Initialize control value if not set or not in remaining_levels
+                                if st.session_state.te_control_value not in remaining_levels:
+                                    st.session_state.te_control_value = remaining_levels[0] if remaining_levels else None
                                 control_value = st.selectbox(
                                     "Control level",
                                     options=remaining_levels,
-                                    index=0,
-                                    key="control_level_select"
+                                    index=remaining_levels.index(st.session_state.te_control_value) if st.session_state.te_control_value in remaining_levels else 0,
+                                    key="te_control_level_select"
                                 )
+                                st.session_state.te_control_value = control_value
                         else:
                             treated_value = common_levels[1]
                             control_value = common_levels[0]
+                            st.session_state.te_treated_value = treated_value
+                            st.session_state.te_control_value = control_value
                             st.caption(
                                 f"Using treatment levels: treated={treated_value}, control={control_value}"
                             )
