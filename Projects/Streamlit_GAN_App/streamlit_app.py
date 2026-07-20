@@ -3117,6 +3117,8 @@ elif page == "Method Comparison":
         if comparison_source_df is not None:
             st.caption(f"Selected comparison dataset rows: {len(comparison_source_df)} | columns: {len(comparison_source_df.columns)}")
 
+        comparison_row_basis = len(comparison_source_df) if comparison_source_df is not None else len(base_real_df)
+
         source_option = st.radio(
             "Data source for alternative methods",
             options=["Use current preprocessed data", "Use unedited original data"],
@@ -3140,7 +3142,7 @@ elif page == "Method Comparison":
         n_rows_to_generate = st.number_input(
             "Synthetic rows per method",
             min_value=1,
-            max_value=max(1, int(max(len(base_real_df), len(st.session_state.synthetic_df)) * 3)),
+            max_value=max(1, int(max(len(base_real_df), comparison_row_basis) * 3)),
             value=max(1, len(base_real_df)),
             step=1,
         )
