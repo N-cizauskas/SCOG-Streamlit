@@ -2409,11 +2409,47 @@ elif page == "View Results":
 
                 if outcome_col is not None:
                     real_levels = list(pd.Series(st.session_state.df[treat_col]).dropna().unique())
-                    synth_levels = list(pd.Series(synthetic_df_for_te[treat_col]).dropna().unique())
+                    synth_levels = list(pd.Series(st.session_state.synthetic_df[treat_col]).dropna().unique())
                     common_levels = sorted([v for v in real_levels if v in synth_levels])
 
+                    if len(common_levels) < 2:
+                        st.warning("Need at least 2 shared treatment levels to compute treatment effect.")
+                    else:
+                        st.write(f"**Found {len(common_levels)} common treatment levels: {common_levels}**")
+                        
+                        te_level_c1, te_level_c2 = st.columns(2)
+                        with te_level_c1:
+                            treated_value = st.selectbox(
+                                "Treated level",
+                                options=common_levels,
+                                index=0,
+                                key="te_treated_value_select"
+                            )
+                        remaining = [v for v in common_levels if v != treated_value]
+                        with te_level_c2:
+                            control_value = st.selectbox(
+                                "Control level",
+                                options=remaining,
+                                index=0,
+                                key="te_control_value_select"
+                            )
+
+                        def _compute_te(df: pd.DataFrame, tr_col: str, out_col: str, t_val, c_val):
+                            subset = df[[tr_col, out_col]].dropna()
+                            treated_rows = subset[subset[tr_col] == t_val][out_col]
+                            control_rows = subset[subset[tr_col] == c_val][out_col]
+                            if len(treated_rows) == 0 or len(control_rows) == 0:
+                                return None
+                            return {
+                                'effect': float(treated_rows.mean() - control_rows.mean()),
+                                'treated_mean': float(treated_rows.mean()),
+                                'control_mean': float(control_rows.mean()),
+                                'n_treated': len(treated_rows),
+                                'n_control': len(control_rows),
+                            }
+
                         te_real = _compute_te(st.session_state.df, treat_col, outcome_col, treated_value, control_value)
-                        te_synth = _compute_te(synthetic_df_for_te, treat_col, outcome_col, treated_value, control_value)
+                        te_synth = _compute_te(st.session_state.synthetic_df, treat_col, outcome_col, treated_value, control_value)
 
                         if te_real is None or te_synth is None:
                             st.error("Could not compute treatment effect (missing data in treated/control groups).")
