@@ -180,13 +180,16 @@ class EvaluationMetrics:
         synth_scores = probs_synth.reshape(-1, 1)
 
         if direction == 'synth_to_real':
-            nn = NearestNeighbors(n_neighbors=ratio, algorithm='auto').fit(real_scores)
+            # request extra candidates so without-replacement matching has fallbacks
+            n_candidates = min(max(ratio * 10, 20), len(real_scores))
+            nn = NearestNeighbors(n_neighbors=n_candidates, algorithm='auto').fit(real_scores)
             distances, indices = nn.kneighbors(synth_scores)
             # indices: for each synth -> list of real matches
             synth_indices_iter = enumerate(zip(distances, indices))
             mapping_source = 'synthetic'
         elif direction == 'real_to_synth':
-            nn = NearestNeighbors(n_neighbors=ratio, algorithm='auto').fit(synth_scores)
+            n_candidates = min(max(ratio * 10, 20), len(synth_scores))
+            nn = NearestNeighbors(n_neighbors=n_candidates, algorithm='auto').fit(synth_scores)
             distances, indices = nn.kneighbors(real_scores)
             # indices: for each real -> list of synthetic matches
             synth_indices_iter = enumerate(zip(distances, indices))
