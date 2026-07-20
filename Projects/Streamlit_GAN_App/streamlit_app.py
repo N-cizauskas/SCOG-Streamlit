@@ -3070,63 +3070,23 @@ elif page == "Method Comparison":
         st.error("Please upload data first.")
     else:
         st.subheader("Compare CTGAN Against Alternative Synthesis Methods", anchor=False)
-        st.caption("You can run this section without training a GAN first. Choose an existing dataset source, then compare it against the real data and optional baseline generators.")
-
-        uploaded_comparison_file = st.file_uploader(
-            "Optional comparison dataset (CSV)",
-            type=["csv"],
-            help="Upload a previously generated synthetic dataset or any comparison dataset to evaluate against the real data."
-        )
-
-        source_mode = st.radio(
-            "Comparison dataset",
-            options=["Use uploaded CSV", "Use saved comparison dataset", "Use current GAN output", "Use real data only"],
-            index=0,
-            horizontal=True,
-            help="Choose the dataset to compare against the real data."
-        )
-
-        comparison_source_df = None
-        if source_mode == "Use uploaded CSV":
-            if uploaded_comparison_file is None:
-                st.info("Upload a CSV to use it as the comparison dataset.")
-            else:
-                try:
-                    comparison_source_df = pd.read_csv(uploaded_comparison_file)
-                except Exception as exc:
-                    st.error(f"Could not read uploaded CSV: {exc}")
-        elif source_mode == "Use saved comparison dataset":
-            available_saved = list(st.session_state.get('comparison_synth_data', {}).keys())
-            if not available_saved:
-                st.warning("No saved comparison datasets are available yet. Run a method comparison first or choose another source.")
-            else:
-                selected_saved_method = st.selectbox(
-                    "Saved dataset",
-                    options=available_saved,
-                    help="Choose one previously generated synthetic dataset to compare against the real data."
-                )
-                comparison_source_df = st.session_state.comparison_synth_data[selected_saved_method].copy()
-        elif source_mode == "Use current GAN output":
-            if st.session_state.synthetic_df is None:
-                st.warning("No current GAN output is available. Choose an uploaded or saved dataset instead.")
-            else:
-                comparison_source_df = st.session_state.synthetic_df.copy()
-        else:
-            comparison_source_df = st.session_state.df.copy()
-
-        if comparison_source_df is not None:
-            st.caption(f"Selected comparison dataset rows: {len(comparison_source_df)} | columns: {len(comparison_source_df.columns)}")
-
-        comparison_row_basis = len(comparison_source_df) if comparison_source_df is not None else len(base_real_df)
-        reference_df = comparison_source_df if comparison_source_df is not None else base_real_df
+        st.caption("Select or upload a real dataset, generate synthetic datasets using each selected method, and compare each synthetic output back to that real dataset.")
 
         source_option = st.radio(
-            "Data source for alternative methods",
-            options=["Use current preprocessed data", "Use unedited original data"],
+            "Real dataset source",
+            options=["Use current preprocessed data", "Use unedited original data", "Upload real dataset (CSV)"],
             index=0,
             horizontal=True,
-            help="Choose whether baselines are fitted on the active preprocessed dataset or the original uploaded dataset."
+            help="Choose the real dataset that all methods will be fitted on and evaluated against."
         )
+
+        uploaded_real_file = None
+        if source_option == "Upload real dataset (CSV)":
+            uploaded_real_file = st.file_uploader(
+                "Upload real dataset (CSV)",
+                type=["csv"],
+                help="Upload a real dataset to use as the comparison reference."
+            )
 
         if source_option == "Use unedited original data":
             if st.session_state.original_df is None:
@@ -3134,17 +3094,29 @@ elif page == "Method Comparison":
                 base_real_df = st.session_state.df.copy()
             else:
                 base_real_df = st.session_state.original_df.copy()
+        elif source_option == "Upload real dataset (CSV)":
+            if uploaded_real_file is None:
+                base_real_df = None
+            else:
+                try:
+                    base_real_df = pd.read_csv(uploaded_real_file)
+                except Exception as exc:
+                    st.error(f"Could not read uploaded real dataset: {exc}")
+                    base_real_df = None
         else:
             base_real_df = st.session_state.df.copy()
 
-        st.caption(f"Baseline source rows: {len(base_real_df)} | columns: {len(base_real_df.columns)}")
+        if base_real_df is not None:
+            st.caption(f"Reference real dataset rows: {len(base_real_df)} | columns: {len(base_real_df.columns)}")
+        else:
+            st.info("Select or upload a real dataset to continue.")
 
         random_seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
         n_rows_to_generate = st.number_input(
             "Synthetic rows per method",
             min_value=1,
-            max_value=max(1, int(max(len(base_real_df), comparison_row_basis) * 3)),
-            value=max(1, len(base_real_df)),
+            max_value=max(1, int((len(base_real_df) if base_real_df is not None else 1000) * 3)),
+            value=max(1, len(base_real_df) if base_real_df is not None else 100),
             step=1,
         )
 
@@ -3180,33 +3152,40 @@ elif page == "Method Comparison":
         selected_metrics = st.multiselect(
             "Metrics to compare",
             options=metric_options,
-            default=["RMSE", "RMSE", "MAE", "AUC", "SMD", "Dimension-wise Distance", "k-Anonymity", "Computation Time (sec)", "TEM %"],
+            default=["MSE", "RMSE", "MAE", "SMD", "AUC", "k-Anonymity", "Dimension-wise Distance", "Computation Time (sec)", "TEM %"],
             help="Only selected metrics are computed and displayed in this comparison tab."
         )
         st.session_state.comparison_selected_metrics = selected_metrics
 
-        treatment_options = [c for c in base_real_df.columns if c in (comparison_source_df.columns if comparison_source_df is not None else base_real_df.columns)] if comparison_source_df is not None else []
+        include_current_gan = st.checkbox(
+            "Also include current GAN output in comparison",
+            value=False,
+            disabled=(st.session_state.synthetic_df is None),
+            help="If enabled, adds the current GAN synthetic dataset as an additional comparison row."
+        )
+
+        treatment_options = list(base_real_df.columns) if base_real_df is not None else []
         treatment_config = None
-        if comparison_source_df is not None:
+        if base_real_df is not None:
             with st.expander("Optional Treatment Effect Comparison", expanded=False):
-                st.write("Use this only if your comparison dataset contains a treatment column and an outcome column.")
+                st.write("Use this to compute TEM% using the selected real dataset as reference.")
                 te_c1, te_c2 = st.columns(2)
                 with te_c1:
                     te_condition_col = st.selectbox(
                         "Treatment column",
-                        options=treatment_options if treatment_options else list(comparison_source_df.columns),
+                        options=treatment_options,
                         index=0 if treatment_options else 0,
                         help="Select the treatment/condition column for TEM%.")
                 with te_c2:
-                    te_outcome_candidates = [c for c in comparison_source_df.columns if c != te_condition_col and pd.api.types.is_numeric_dtype(comparison_source_df[c])]
+                    te_outcome_candidates = [c for c in base_real_df.columns if c != te_condition_col and pd.api.types.is_numeric_dtype(base_real_df[c])]
                     te_outcome_col = st.selectbox(
                         "Outcome column",
-                        options=te_outcome_candidates if te_outcome_candidates else list(comparison_source_df.select_dtypes(include=[np.number]).columns),
+                        options=te_outcome_candidates if te_outcome_candidates else list(base_real_df.select_dtypes(include=[np.number]).columns),
                         index=0 if te_outcome_candidates else 0,
                         help="Select the numeric outcome column for TEM%."
                     )
-                if te_condition_col in comparison_source_df.columns and te_outcome_col in comparison_source_df.columns:
-                    levels = list(pd.Series(comparison_source_df[te_condition_col]).dropna().unique())
+                if te_condition_col in base_real_df.columns and te_outcome_col in base_real_df.columns:
+                    levels = list(pd.Series(base_real_df[te_condition_col]).dropna().unique())
                     if len(levels) >= 2:
                         te_l1, te_l2 = st.columns(2)
                         with te_l1:
@@ -3226,8 +3205,10 @@ elif page == "Method Comparison":
         run_comparison = st.button("Run Method Comparison")
 
         if run_comparison:
-            if comparison_source_df is None and len(selected_methods) == 0:
-                st.error("Please upload or select a comparison dataset, or choose at least one alternative method.")
+            if base_real_df is None:
+                st.error("Please select or upload a real dataset first.")
+            elif len(selected_methods) == 0 and not include_current_gan:
+                st.error("Please select at least one synthesis method, or enable current GAN output.")
             elif len(selected_metrics) == 0:
                 st.error("Please select at least one metric to compare.")
             else:
@@ -3238,7 +3219,7 @@ elif page == "Method Comparison":
                     method_to_df = {}
 
                     ctgan_df = None
-                    if st.session_state.synthetic_df is not None:
+                    if include_current_gan and st.session_state.synthetic_df is not None:
                         ctgan_df = st.session_state.synthetic_df.copy()
                         ctgan_df = ctgan_df.sample(n=n_int, replace=(len(ctgan_df) < n_int), random_state=seed_int).reset_index(drop=True)
 
@@ -3282,7 +3263,7 @@ elif page == "Method Comparison":
                     for method_name, synth_df in method_to_df.items():
                         method_time = float(synth_df.attrs.get('generation_seconds', 0.0)) if hasattr(synth_df, 'attrs') else 0.0
                         metric_values = compute_selected_comparison_metrics(
-                            reference_df,
+                            base_real_df,
                             synth_df,
                             selected_metrics,
                             continuous_cols,
