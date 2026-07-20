@@ -2358,9 +2358,18 @@ elif page == "View Results":
             )
 
             all_cols = st.session_state.df.columns.tolist()
-            shared_cols = [c for c in all_cols if c in st.session_state.synthetic_df.columns]
+            synth_cols = st.session_state.synthetic_df.columns.tolist()
+            shared_cols = [c for c in all_cols if c in synth_cols]
             
-            st.caption(f"Available shared columns: {', '.join(shared_cols)}")
+            # Debug info
+            with st.expander("Column Debug Info", expanded=False):
+                st.write(f"**Original DF columns ({len(all_cols)}):** {all_cols}")
+                st.write(f"**Synthetic DF columns ({len(synth_cols)}):** {synth_cols}")
+                st.write(f"**Shared columns ({len(shared_cols)}):** {shared_cols}")
+                st.write(f"**Excluded columns:** {st.session_state.get('excluded_cols', [])}")
+                st.write(f"**Conditional column set to:** {st.session_state.get('condition_col', 'None')}")
+            
+            st.caption(f"Available shared columns: {', '.join(shared_cols) if shared_cols else 'None found'}")
 
             if not shared_cols:
                 st.warning("No columns are shared between original and synthetic data.")
