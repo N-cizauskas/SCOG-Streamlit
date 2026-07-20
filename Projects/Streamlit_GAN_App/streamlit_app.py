@@ -2359,6 +2359,8 @@ elif page == "View Results":
 
             all_cols = st.session_state.df.columns.tolist()
             shared_cols = [c for c in all_cols if c in st.session_state.synthetic_df.columns]
+            
+            st.caption(f"Available shared columns: {', '.join(shared_cols)}")
 
             if not shared_cols:
                 st.warning("No columns are shared between original and synthetic data.")
@@ -2369,7 +2371,6 @@ elif page == "View Results":
                     treat_col = st.selectbox(
                         "Treatment/Condition Column",
                         options=shared_cols,
-                        index=0,
                         help="Select the column containing treatment/group assignments.",
                         key="te_treat_col_select"
                     )
@@ -2383,7 +2384,6 @@ elif page == "View Results":
                         outcome_col = st.selectbox(
                             "Outcome Column",
                             options=numeric_cols,
-                            index=0,
                             help="Select a numeric outcome to measure treatment effect.",
                             key="te_outcome_col_select"
                         )
@@ -2392,6 +2392,7 @@ elif page == "View Results":
                     real_levels = list(pd.Series(st.session_state.df[treat_col]).dropna().unique())
                     synth_levels = list(pd.Series(st.session_state.synthetic_df[treat_col]).dropna().unique())
                     common_levels = sorted([v for v in real_levels if v in synth_levels])
+
 
                     if len(common_levels) < 2:
                         st.warning("Need at least 2 shared treatment levels to compute treatment effect.")
@@ -2443,36 +2444,41 @@ elif page == "View Results":
                             else:
                                 maintenance_pct = max(0.0, 100.0 * (1.0 - effect_gap / abs(real_effect)))
 
+                            st.write("### Treatment Effects (Treated - Control)")
                             te_m1, te_m2, te_m3, te_m4 = st.columns(4)
                             with te_m1:
-                                st.metric("Real Effect (τ_R)", f"{real_effect:.6f}")
+                                st.metric("Real TE (τ_R)", f"{real_effect:.6f}")
                             with te_m2:
-                                st.metric("Synthetic Effect (τ_S)", f"{synth_effect:.6f}")
+                                st.metric("Synthetic TE (τ_S)", f"{synth_effect:.6f}")
                             with te_m3:
-                                st.metric("Effect Gap (Δ)", f"{effect_gap:.6f}")
+                                st.metric("Effect Gap", f"{effect_gap:.6f}")
                             with te_m4:
                                 if maintenance_pct is None:
-                                    st.metric("Maintenance (TEM)", "—")
+                                    st.metric("TEM %", "—")
                                 else:
-                                    st.metric("Maintenance (TEM)", f"{maintenance_pct:.1f}%")
+                                    st.metric("TEM %", f"{maintenance_pct:.1f}%")
 
-                            dleft, dright = st.columns(2)
-                            with dleft:
-                                st.write("**Original Data**")
-                                st.json({
-                                    'treated_mean': round(te_real['treated_mean'], 6),
-                                    'control_mean': round(te_real['control_mean'], 6),
-                                    'n_treated': te_real['n_treated'],
-                                    'n_control': te_real['n_control'],
-                                })
-                            with dright:
-                                st.write("**Synthetic Data**")
-                                st.json({
-                                    'treated_mean': round(te_synth['treated_mean'], 6),
-                                    'control_mean': round(te_synth['control_mean'], 6),
-                                    'n_treated': te_synth['n_treated'],
-                                    'n_control': te_synth['n_control'],
-                                })
+                            st.write("### Treated Arm (T=1)")
+                            real_t_c1, real_t_c2, synth_t_c1, synth_t_c2 = st.columns(4)
+                            with real_t_c1:
+                                st.metric("Real Mean", f"{te_real['treated_mean']:.6f}")
+                            with real_t_c2:
+                                st.metric("Real N", te_real['n_treated'])
+                            with synth_t_c1:
+                                st.metric("Synthetic Mean", f"{te_synth['treated_mean']:.6f}")
+                            with synth_t_c2:
+                                st.metric("Synthetic N", te_synth['n_treated'])
+
+                            st.write("### Control Arm (T=0)")
+                            real_c_c1, real_c_c2, synth_c_c1, synth_c_c2 = st.columns(4)
+                            with real_c_c1:
+                                st.metric("Real Mean", f"{te_real['control_mean']:.6f}")
+                            with real_c_c2:
+                                st.metric("Real N", te_real['n_control'])
+                            with synth_c_c1:
+                                st.metric("Synthetic Mean", f"{te_synth['control_mean']:.6f}")
+                            with synth_c_c2:
+                                st.metric("Synthetic N", te_synth['n_control'])
 
         cfg_for_distance = st.session_state.get('config', {})
         cont_for_distance = list(cfg_for_distance.get('continuous_cols', []))
