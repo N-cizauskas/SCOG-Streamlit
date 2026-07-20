@@ -644,12 +644,65 @@ def generate_kde_sample(df: pd.DataFrame, n_rows: int, random_state: int = 42) -
     return synth[df.columns]
 
 
+def compute_treatment_effect_comparison(
+    real_df: pd.DataFrame,
+    synth_df: pd.DataFrame,
+    condition_col: str,
+    outcome_col: str,
+    treated_value,
+    control_value,
+):
+    if condition_col not in real_df.columns or condition_col not in synth_df.columns:
+        return None
+    if outcome_col not in real_df.columns or outcome_col not in synth_df.columns:
+        return None
+
+    def _arm_stats(df: pd.DataFrame):
+        subset = df[[condition_col, outcome_col]].dropna()
+        treated_rows = subset[subset[condition_col] == treated_value][outcome_col]
+        control_rows = subset[subset[condition_col] == control_value][outcome_col]
+        if len(treated_rows) == 0 or len(control_rows) == 0:
+            return None
+        treated_mean = float(treated_rows.mean())
+        control_mean = float(control_rows.mean())
+        return {
+            'effect': treated_mean - control_mean,
+            'treated_mean': treated_mean,
+            'control_mean': control_mean,
+            'n_treated': int(len(treated_rows)),
+            'n_control': int(len(control_rows)),
+        }
+
+    real_stats = _arm_stats(real_df)
+    synth_stats = _arm_stats(synth_df)
+    if real_stats is None or synth_stats is None:
+        return None
+
+    real_effect = real_stats['effect']
+    synth_effect = synth_stats['effect']
+    gap = abs(synth_effect - real_effect)
+    tem_pct = None if abs(real_effect) < 1e-10 else max(0.0, 100.0 * (1.0 - (gap / abs(real_effect))))
+
+    return {
+        'Real TE': real_effect,
+        'Synthetic TE': synth_effect,
+        'TE Gap': gap,
+        'TEM %': tem_pct,
+        'Real Treated Mean': real_stats['treated_mean'],
+        'Real Control Mean': real_stats['control_mean'],
+        'Synthetic Treated Mean': synth_stats['treated_mean'],
+        'Synthetic Control Mean': synth_stats['control_mean'],
+    }
+
+
 def compute_selected_comparison_metrics(
     real_df: pd.DataFrame,
     synth_df: pd.DataFrame,
     selected_metrics: list[str],
     continuous_cols: list[str],
     categorical_cols: list[str],
+    treatment_config: dict | None = None,
+    computation_time_seconds: float | None = None,
 ):
     result = {}
     real_aligned, synth_aligned = _align_real_synth_for_metrics(real_df, synth_df)
@@ -658,7 +711,7 @@ def compute_selected_comparison_metrics(
             result[metric_name] = np.nan
         return result
 
-    needs_summary = any(m in selected_metrics for m in ['RMSE', 'MSE', 'MAE', 'AUC', 'Mean |SMD|'])
+    needs_summary = any(m in selected_metrics for m in ['RMSE', 'MSE', 'MAE', 'AUC', 'Mean |SMD|', 'SMD'])
     summary = None
     if needs_summary:
         try:
@@ -675,7 +728,7 @@ def compute_selected_comparison_metrics(
             result[metric_name] = summary['mae'] if summary else np.nan
         elif metric_name == 'AUC':
             result[metric_name] = summary.get('auc', np.nan) if summary else np.nan
-        elif metric_name == 'Mean |SMD|':
+        elif metric_name in ['Mean |SMD|', 'SMD']:
             if summary and 'smd' in summary and len(summary['smd']) > 0:
                 result[metric_name] = float(np.mean(np.abs(list(summary['smd'].values()))))
             else:
@@ -696,6 +749,25 @@ def compute_selected_comparison_metrics(
                 result[metric_name] = k_report['k_anonymity']
             except Exception:
                 result[metric_name] = np.nan
+        elif metric_name in ['Computation Time (sec)', 'Computation Time']:
+            result[metric_name] = computation_time_seconds if computation_time_seconds is not None else np.nan
+        elif metric_name == 'TEM %':
+            tem_value = np.nan
+            if treatment_config:
+                try:
+                    tem_report = compute_treatment_effect_comparison(
+                        real_df,
+                        synth_df,
+                        treatment_config['condition_col'],
+                        treatment_config['outcome_col'],
+                        treatment_config['treated_value'],
+                        treatment_config['control_value'],
+                    )
+                    if tem_report is not None:
+                        tem_value = tem_report['TEM %'] if tem_report['TEM %'] is not None else np.nan
+                except Exception:
+                    tem_value = np.nan
+            result[metric_name] = tem_value
 
     return result
 
@@ -2994,13 +3066,56 @@ elif page == "View Results":
 elif page == "Method Comparison":
     st.markdown('<div class="section-header">Method Comparison</div>', unsafe_allow_html=True)
 
-    if st.session_state.synthetic_df is None or not st.session_state.model_trained:
-        st.error("Please train the GAN model first to compare alternative synthesis methods.")
-    elif st.session_state.df is None:
+    if st.session_state.df is None:
         st.error("Please upload data first.")
     else:
         st.subheader("Compare CTGAN Against Alternative Synthesis Methods", anchor=False)
-        st.caption("Run simple baseline tabular synthesizers and compare only the metrics you select.")
+        st.caption("You can run this section without training a GAN first. Choose an existing dataset source, then compare it against the real data and optional baseline generators.")
+
+        uploaded_comparison_file = st.file_uploader(
+            "Optional comparison dataset (CSV)",
+            type=["csv"],
+            help="Upload a previously generated synthetic dataset or any comparison dataset to evaluate against the real data."
+        )
+
+        source_mode = st.radio(
+            "Comparison dataset",
+            options=["Use uploaded CSV", "Use saved comparison dataset", "Use current GAN output", "Use real data only"],
+            index=0,
+            horizontal=True,
+            help="Choose the dataset to compare against the real data."
+        )
+
+        comparison_source_df = None
+        if source_mode == "Use uploaded CSV":
+            if uploaded_comparison_file is None:
+                st.info("Upload a CSV to use it as the comparison dataset.")
+            else:
+                try:
+                    comparison_source_df = pd.read_csv(uploaded_comparison_file)
+                except Exception as exc:
+                    st.error(f"Could not read uploaded CSV: {exc}")
+        elif source_mode == "Use saved comparison dataset":
+            available_saved = list(st.session_state.get('comparison_synth_data', {}).keys())
+            if not available_saved:
+                st.warning("No saved comparison datasets are available yet. Run a method comparison first or choose another source.")
+            else:
+                selected_saved_method = st.selectbox(
+                    "Saved dataset",
+                    options=available_saved,
+                    help="Choose one previously generated synthetic dataset to compare against the real data."
+                )
+                comparison_source_df = st.session_state.comparison_synth_data[selected_saved_method].copy()
+        elif source_mode == "Use current GAN output":
+            if st.session_state.synthetic_df is None:
+                st.warning("No current GAN output is available. Choose an uploaded or saved dataset instead.")
+            else:
+                comparison_source_df = st.session_state.synthetic_df.copy()
+        else:
+            comparison_source_df = st.session_state.df.copy()
+
+        if comparison_source_df is not None:
+            st.caption(f"Selected comparison dataset rows: {len(comparison_source_df)} | columns: {len(comparison_source_df.columns)}")
 
         source_option = st.radio(
             "Data source for alternative methods",
@@ -3019,7 +3134,7 @@ elif page == "Method Comparison":
         else:
             base_real_df = st.session_state.df.copy()
 
-        st.caption(f"Comparison source rows: {len(base_real_df)} | columns: {len(base_real_df.columns)}")
+        st.caption(f"Baseline source rows: {len(base_real_df)} | columns: {len(base_real_df.columns)}")
 
         random_seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
         n_rows_to_generate = st.number_input(
@@ -3051,33 +3166,84 @@ elif page == "Method Comparison":
             "MSE",
             "MAE",
             "AUC",
+            "SMD",
             "Dimension-wise Distance",
             "Manhattan (L1)",
             "Mean |SMD|",
             "k-Anonymity",
+            "TEM %",
+            "Computation Time (sec)",
         ]
         selected_metrics = st.multiselect(
             "Metrics to compare",
             options=metric_options,
-            default=["RMSE", "MAE", "AUC", "Dimension-wise Distance", "k-Anonymity"],
+            default=["RMSE", "RMSE", "MAE", "AUC", "SMD", "Dimension-wise Distance", "k-Anonymity", "Computation Time (sec)", "TEM %"],
             help="Only selected metrics are computed and displayed in this comparison tab."
         )
         st.session_state.comparison_selected_metrics = selected_metrics
 
+        treatment_options = [c for c in base_real_df.columns if c in (comparison_source_df.columns if comparison_source_df is not None else base_real_df.columns)] if comparison_source_df is not None else []
+        treatment_config = None
+        if comparison_source_df is not None:
+            with st.expander("Optional Treatment Effect Comparison", expanded=False):
+                st.write("Use this only if your comparison dataset contains a treatment column and an outcome column.")
+                te_c1, te_c2 = st.columns(2)
+                with te_c1:
+                    te_condition_col = st.selectbox(
+                        "Treatment column",
+                        options=treatment_options if treatment_options else list(comparison_source_df.columns),
+                        index=0 if treatment_options else 0,
+                        help="Select the treatment/condition column for TEM%.")
+                with te_c2:
+                    te_outcome_candidates = [c for c in comparison_source_df.columns if c != te_condition_col and pd.api.types.is_numeric_dtype(comparison_source_df[c])]
+                    te_outcome_col = st.selectbox(
+                        "Outcome column",
+                        options=te_outcome_candidates if te_outcome_candidates else list(comparison_source_df.select_dtypes(include=[np.number]).columns),
+                        index=0 if te_outcome_candidates else 0,
+                        help="Select the numeric outcome column for TEM%."
+                    )
+                if te_condition_col in comparison_source_df.columns and te_outcome_col in comparison_source_df.columns:
+                    levels = list(pd.Series(comparison_source_df[te_condition_col]).dropna().unique())
+                    if len(levels) >= 2:
+                        te_l1, te_l2 = st.columns(2)
+                        with te_l1:
+                            treated_value = st.selectbox("Treated value", options=levels, index=0, key="mc_te_treated")
+                        with te_l2:
+                            control_candidates = [v for v in levels if v != treated_value]
+                            control_value = st.selectbox("Control value", options=control_candidates, index=0, key="mc_te_control")
+                        treatment_config = {
+                            'condition_col': te_condition_col,
+                            'outcome_col': te_outcome_col,
+                            'treated_value': treated_value,
+                            'control_value': control_value,
+                        }
+                    else:
+                        st.warning("TEM% requires at least two levels in the selected treatment column.")
+
         run_comparison = st.button("Run Method Comparison")
 
         if run_comparison:
-            if len(selected_methods) == 0:
-                st.error("Please select at least one alternative method.")
+            if comparison_source_df is None and len(selected_methods) == 0:
+                st.error("Please upload or select a comparison dataset, or choose at least one alternative method.")
             elif len(selected_metrics) == 0:
                 st.error("Please select at least one metric to compare.")
             else:
-                with st.spinner("Generating alternative synthetic datasets and computing selected metrics..."):
+                with st.spinner("Generating comparison datasets and computing selected metrics..."):
                     seed_int = int(random_seed)
                     n_int = int(n_rows_to_generate)
 
-                    ctgan_df = st.session_state.synthetic_df.copy()
-                    ctgan_df = ctgan_df.sample(n=n_int, replace=(len(ctgan_df) < n_int), random_state=seed_int).reset_index(drop=True)
+                    method_to_df = {}
+                    if comparison_source_df is not None:
+                        method_to_df['Selected Dataset'] = comparison_source_df.sample(
+                            n=n_int,
+                            replace=(len(comparison_source_df) < n_int),
+                            random_state=seed_int,
+                        ).reset_index(drop=True)
+
+                    ctgan_df = None
+                    if st.session_state.synthetic_df is not None:
+                        ctgan_df = st.session_state.synthetic_df.copy()
+                        ctgan_df = ctgan_df.sample(n=n_int, replace=(len(ctgan_df) < n_int), random_state=seed_int).reset_index(drop=True)
 
                     if source_option == "Use current preprocessed data":
                         continuous_cols = list(st.session_state.get('config', {}).get('continuous_cols', st.session_state.continuous_cols or []))
@@ -3089,12 +3255,12 @@ elif page == "Method Comparison":
                     else:
                         continuous_cols, categorical_cols = infer_column_groups_for_comparison(base_real_df)
 
-                    method_to_df = {
-                        'CTGAN (current model)': ctgan_df
-                    }
+                    if ctgan_df is not None:
+                        method_to_df['CTGAN (current model)'] = ctgan_df
 
                     for idx, method_name in enumerate(selected_methods):
                         method_seed = seed_int + idx + 1
+                        method_start = time.perf_counter()
                         if method_name == "Random Row Sampling":
                             method_to_df[method_name] = generate_random_row_sample(base_real_df, n_int, random_state=method_seed)
                         elif method_name == "Independent Column Sampling":
@@ -3109,15 +3275,23 @@ elif page == "Method Comparison":
                             method_to_df[method_name] = generate_kmeans_cluster_bootstrap(base_real_df, n_int, random_state=method_seed)
                         elif method_name == "KDE Sampling":
                             method_to_df[method_name] = generate_kde_sample(base_real_df, n_int, random_state=method_seed)
+                        generation_seconds = time.perf_counter() - method_start
+
+                        if method_name in method_to_df:
+                            method_to_df[method_name] = method_to_df[method_name].reset_index(drop=True)
+                        method_to_df[method_name].attrs['generation_seconds'] = generation_seconds
 
                     rows = []
                     for method_name, synth_df in method_to_df.items():
+                        method_time = float(synth_df.attrs.get('generation_seconds', 0.0)) if hasattr(synth_df, 'attrs') else 0.0
                         metric_values = compute_selected_comparison_metrics(
                             base_real_df,
                             synth_df,
                             selected_metrics,
                             continuous_cols,
                             categorical_cols,
+                            treatment_config=treatment_config,
+                            computation_time_seconds=method_time,
                         )
                         row = {'Method': method_name}
                         row.update(metric_values)
