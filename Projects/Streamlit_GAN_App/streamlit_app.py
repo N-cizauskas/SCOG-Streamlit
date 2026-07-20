@@ -2354,115 +2354,86 @@ elif page == "View Results":
         st.subheader("Treatment Effect Maintenance", anchor=False)
         with st.expander("Treatment Effect Maintenance", expanded=False):
             st.write(
-                "Compare treatment effect in original vs synthetic data using the conditional column (or `treat` if no condition column is configured)."
+                "Manually select a treatment column and outcome column to compare treatment effect in original vs synthetic data."
             )
 
-            cfg_cond_col = st.session_state.get('config', {}).get('condition_col')
-            sess_cond_col = st.session_state.get('condition_col')
-            
-            treat_col = None
-            # Try config condition_col first (highest priority)
-            if cfg_cond_col and cfg_cond_col in st.session_state.df.columns:
-                treat_col = cfg_cond_col
-            # Try session state condition_col
-            elif sess_cond_col and sess_cond_col in st.session_state.df.columns:
-                treat_col = sess_cond_col
-            # Try 'treat' column
-            elif 'treat' in st.session_state.df.columns:
-                treat_col = 'treat'
+            all_cols = st.session_state.df.columns.tolist()
+            shared_cols = [c for c in all_cols if c in st.session_state.synthetic_df.columns]
 
-            if treat_col is None or treat_col not in st.session_state.synthetic_df.columns:
-                st.info(
-                    "No valid treatment/condition column found in both datasets. Set a condition column in Configure Model or include a `treat` column."
-                )
+            if not shared_cols:
+                st.warning("No columns are shared between original and synthetic data.")
             else:
-                numeric_outcomes = [
-                    c for c in st.session_state.df.select_dtypes(include=[np.number]).columns
-                    if c != treat_col and c in st.session_state.synthetic_df.columns
-                ]
-
-                if not numeric_outcomes:
-                    st.warning("No numeric outcome columns available for treatment-effect comparison.")
-                else:
-                    # Initialize outcome column in session state if not already set
-                    if st.session_state.te_outcome_col not in numeric_outcomes if st.session_state.te_outcome_col else True:
-                        st.session_state.te_outcome_col = numeric_outcomes[0] if numeric_outcomes else None
-                    
-                    outcome_col = st.selectbox(
-                        "Outcome column",
-                        options=numeric_outcomes,
-                        index=numeric_outcomes.index(st.session_state.te_outcome_col) if st.session_state.te_outcome_col in numeric_outcomes else 0,
-                        help="Select a numeric outcome to compare treatment effect in real vs synthetic data.",
-                        key="te_outcome_selectbox"
+                te_select_c1, te_select_c2 = st.columns(2)
+                
+                with te_select_c1:
+                    treat_col = st.selectbox(
+                        "Treatment/Condition Column",
+                        options=shared_cols,
+                        index=0,
+                        help="Select the column containing treatment/group assignments.",
+                        key="te_treat_col_select"
                     )
-                    st.session_state.te_outcome_col = outcome_col
+                
+                with te_select_c2:
+                    numeric_cols = [c for c in shared_cols if c != treat_col and pd.api.types.is_numeric_dtype(st.session_state.df[c])]
+                    if not numeric_cols:
+                        st.warning("No numeric outcome columns available (excluding treatment column).")
+                        outcome_col = None
+                    else:
+                        outcome_col = st.selectbox(
+                            "Outcome Column",
+                            options=numeric_cols,
+                            index=0,
+                            help="Select a numeric outcome to measure treatment effect.",
+                            key="te_outcome_col_select"
+                        )
 
-                    real_levels = [v for v in pd.Series(st.session_state.df[treat_col]).dropna().unique().tolist()]
-                    synth_levels = [v for v in pd.Series(st.session_state.synthetic_df[treat_col]).dropna().unique().tolist()]
-                    common_levels = [v for v in real_levels if v in synth_levels]
+                if outcome_col is not None:
+                    real_levels = list(pd.Series(st.session_state.df[treat_col]).dropna().unique())
+                    synth_levels = list(pd.Series(st.session_state.synthetic_df[treat_col]).dropna().unique())
+                    common_levels = sorted([v for v in real_levels if v in synth_levels])
 
                     if len(common_levels) < 2:
-                        st.warning(
-                            "Need at least two shared treatment levels between original and synthetic data to compute treatment effect."
-                        )
+                        st.warning("Need at least 2 shared treatment levels to compute treatment effect.")
                     else:
-                        if len(common_levels) > 2:
-                            te_c1, te_c2 = st.columns(2)
-                            with te_c1:
-                                # Initialize treated value if not set or not in common_levels
-                                if st.session_state.te_treated_value not in common_levels:
-                                    st.session_state.te_treated_value = common_levels[0] if common_levels else None
-                                treated_value = st.selectbox(
-                                    "Treated level",
-                                    options=common_levels,
-                                    index=common_levels.index(st.session_state.te_treated_value) if st.session_state.te_treated_value in common_levels else 0,
-                                    key="te_treated_level_select"
-                                )
-                                st.session_state.te_treated_value = treated_value
-                            remaining_levels = [v for v in common_levels if v != treated_value]
-                            with te_c2:
-                                # Initialize control value if not set or not in remaining_levels
-                                if st.session_state.te_control_value not in remaining_levels:
-                                    st.session_state.te_control_value = remaining_levels[0] if remaining_levels else None
-                                control_value = st.selectbox(
-                                    "Control level",
-                                    options=remaining_levels,
-                                    index=remaining_levels.index(st.session_state.te_control_value) if st.session_state.te_control_value in remaining_levels else 0,
-                                    key="te_control_level_select"
-                                )
-                                st.session_state.te_control_value = control_value
-                        else:
-                            treated_value = common_levels[1]
-                            control_value = common_levels[0]
-                            st.session_state.te_treated_value = treated_value
-                            st.session_state.te_control_value = control_value
-                            st.caption(
-                                f"Using treatment levels: treated={treated_value}, control={control_value}"
+                        st.write(f"**Found {len(common_levels)} common treatment levels: {common_levels}**")
+                        
+                        te_level_c1, te_level_c2 = st.columns(2)
+                        with te_level_c1:
+                            treated_value = st.selectbox(
+                                "Treated level",
+                                options=common_levels,
+                                index=0,
+                                key="te_treated_value_select"
+                            )
+                        remaining = [v for v in common_levels if v != treated_value]
+                        with te_level_c2:
+                            control_value = st.selectbox(
+                                "Control level",
+                                options=remaining,
+                                index=0,
+                                key="te_control_value_select"
                             )
 
-                        def _compute_te(df_in: pd.DataFrame, tr_col: str, out_col: str, t_val, c_val):
-                            local = df_in[[tr_col, out_col]].dropna()
-                            treated = local[local[tr_col] == t_val][out_col]
-                            control = local[local[tr_col] == c_val][out_col]
-                            if treated.empty or control.empty:
+                        def _compute_te(df: pd.DataFrame, tr_col: str, out_col: str, t_val, c_val):
+                            subset = df[[tr_col, out_col]].dropna()
+                            treated_rows = subset[subset[tr_col] == t_val][out_col]
+                            control_rows = subset[subset[tr_col] == c_val][out_col]
+                            if len(treated_rows) == 0 or len(control_rows) == 0:
                                 return None
-                            treated_mean = float(treated.mean())
-                            control_mean = float(control.mean())
                             return {
-                                'effect': treated_mean - control_mean,
-                                'treated_mean': treated_mean,
-                                'control_mean': control_mean,
-                                'n_treated': int(len(treated)),
-                                'n_control': int(len(control)),
+                                'effect': float(treated_rows.mean() - control_rows.mean()),
+                                'treated_mean': float(treated_rows.mean()),
+                                'control_mean': float(control_rows.mean()),
+                                'n_treated': len(treated_rows),
+                                'n_control': len(control_rows),
                             }
 
                         te_real = _compute_te(st.session_state.df, treat_col, outcome_col, treated_value, control_value)
                         te_synth = _compute_te(st.session_state.synthetic_df, treat_col, outcome_col, treated_value, control_value)
 
                         if te_real is None or te_synth is None:
-                            st.warning(
-                                "Could not compute treatment effect for one or both datasets (missing treated/control rows after filtering)."
-                            )
+                            st.error("Could not compute treatment effect (missing data in treated/control groups).")
                         else:
                             real_effect = te_real['effect']
                             synth_effect = te_synth['effect']
@@ -2470,42 +2441,38 @@ elif page == "View Results":
                             if abs(real_effect) < 1e-10:
                                 maintenance_pct = None
                             else:
-                                maintenance_pct = max(0.0, 100.0 * (1.0 - (effect_gap / abs(real_effect))))
+                                maintenance_pct = max(0.0, 100.0 * (1.0 - effect_gap / abs(real_effect)))
 
                             te_m1, te_m2, te_m3, te_m4 = st.columns(4)
                             with te_m1:
-                                st.metric("Real Effect", f"{real_effect:.6f}")
+                                st.metric("Real Effect (τ_R)", f"{real_effect:.6f}")
                             with te_m2:
-                                st.metric("Synthetic Effect", f"{synth_effect:.6f}")
+                                st.metric("Synthetic Effect (τ_S)", f"{synth_effect:.6f}")
                             with te_m3:
-                                st.metric("Absolute Gap", f"{effect_gap:.6f}")
+                                st.metric("Effect Gap (Δ)", f"{effect_gap:.6f}")
                             with te_m4:
                                 if maintenance_pct is None:
-                                    st.metric("Maintenance", "N/A")
+                                    st.metric("Maintenance (TEM)", "—")
                                 else:
-                                    st.metric("Maintenance", f"{maintenance_pct:.1f}%")
+                                    st.metric("Maintenance (TEM)", f"{maintenance_pct:.1f}%")
 
                             dleft, dright = st.columns(2)
                             with dleft:
                                 st.write("**Original Data**")
-                                st.write(
-                                    {
-                                        'treated_mean': round(te_real['treated_mean'], 6),
-                                        'control_mean': round(te_real['control_mean'], 6),
-                                        'n_treated': te_real['n_treated'],
-                                        'n_control': te_real['n_control'],
-                                    }
-                                )
+                                st.json({
+                                    'treated_mean': round(te_real['treated_mean'], 6),
+                                    'control_mean': round(te_real['control_mean'], 6),
+                                    'n_treated': te_real['n_treated'],
+                                    'n_control': te_real['n_control'],
+                                })
                             with dright:
                                 st.write("**Synthetic Data**")
-                                st.write(
-                                    {
-                                        'treated_mean': round(te_synth['treated_mean'], 6),
-                                        'control_mean': round(te_synth['control_mean'], 6),
-                                        'n_treated': te_synth['n_treated'],
-                                        'n_control': te_synth['n_control'],
-                                    }
-                                )
+                                st.json({
+                                    'treated_mean': round(te_synth['treated_mean'], 6),
+                                    'control_mean': round(te_synth['control_mean'], 6),
+                                    'n_treated': te_synth['n_treated'],
+                                    'n_control': te_synth['n_control'],
+                                })
 
         cfg_for_distance = st.session_state.get('config', {})
         cont_for_distance = list(cfg_for_distance.get('continuous_cols', []))
