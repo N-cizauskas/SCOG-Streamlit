@@ -3118,6 +3118,7 @@ elif page == "Method Comparison":
             st.caption(f"Selected comparison dataset rows: {len(comparison_source_df)} | columns: {len(comparison_source_df.columns)}")
 
         comparison_row_basis = len(comparison_source_df) if comparison_source_df is not None else len(base_real_df)
+        reference_df = comparison_source_df if comparison_source_df is not None else base_real_df
 
         source_option = st.radio(
             "Data source for alternative methods",
@@ -3235,12 +3236,6 @@ elif page == "Method Comparison":
                     n_int = int(n_rows_to_generate)
 
                     method_to_df = {}
-                    if comparison_source_df is not None:
-                        method_to_df['Selected Dataset'] = comparison_source_df.sample(
-                            n=n_int,
-                            replace=(len(comparison_source_df) < n_int),
-                            random_state=seed_int,
-                        ).reset_index(drop=True)
 
                     ctgan_df = None
                     if st.session_state.synthetic_df is not None:
@@ -3287,7 +3282,7 @@ elif page == "Method Comparison":
                     for method_name, synth_df in method_to_df.items():
                         method_time = float(synth_df.attrs.get('generation_seconds', 0.0)) if hasattr(synth_df, 'attrs') else 0.0
                         metric_values = compute_selected_comparison_metrics(
-                            base_real_df,
+                            reference_df,
                             synth_df,
                             selected_metrics,
                             continuous_cols,
