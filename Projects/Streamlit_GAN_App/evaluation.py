@@ -196,29 +196,41 @@ class EvaluationMetrics:
 
         matched_real_indices = []
         matched_synth_indices = []
+        used_real_indices: set = set()
+        used_synth_indices: set = set()
 
-        # build matched index pairs according to direction
+        # build matched index pairs according to direction (without replacement)
         for idx_outer, (dists_row, idx_row) in synth_indices_iter:
             # idx_outer corresponds to synthetic index when synth_to_real, otherwise real index
             # apply caliper if provided
             if caliper is not None:
                 valid_pairs = [(d, i) for d, i in zip(dists_row, idx_row) if d <= caliper]
-                if not valid_pairs:
-                    continue
-                chosen = valid_pairs
             else:
-                chosen = list(zip(dists_row, idx_row))
+                valid_pairs = list(zip(dists_row, idx_row))
 
             if direction == 'synth_to_real':
                 synth_idx = idx_outer
-                for d, real_i in chosen:
-                    matched_real_indices.append(real_i)
-                    matched_synth_indices.append(synth_idx)
+                if synth_idx in used_synth_indices:
+                    continue
+                # pick the closest real record not already matched
+                for d, real_i in sorted(valid_pairs, key=lambda x: x[0]):
+                    if real_i not in used_real_indices:
+                        matched_real_indices.append(real_i)
+                        matched_synth_indices.append(synth_idx)
+                        used_real_indices.add(real_i)
+                        used_synth_indices.add(synth_idx)
+                        break  # one match per synthetic record (ratio=1 without replacement)
             else:  # real_to_synth
                 real_idx = idx_outer
-                for d, synth_i in chosen:
-                    matched_real_indices.append(real_idx)
-                    matched_synth_indices.append(synth_i)
+                if real_idx in used_real_indices:
+                    continue
+                for d, synth_i in sorted(valid_pairs, key=lambda x: x[0]):
+                    if synth_i not in used_synth_indices:
+                        matched_real_indices.append(real_idx)
+                        matched_synth_indices.append(synth_i)
+                        used_real_indices.add(real_idx)
+                        used_synth_indices.add(synth_i)
+                        break
 
         # build matched DataFrames
         if not matched_real_indices:
